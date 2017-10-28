@@ -18,15 +18,17 @@
   +----------------------------------------------------------------------+
 */
 
+#ifndef PHP_WIN32
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <ifaddrs.h>
-
-#include "php_swoole.h"
 #include "swError.h"
 #include "swBaseOperator.h"
+#endif
+
 #include "zanLog.h"
+#include "php_swoole.h"
 
 #if PHP_MAJOR_VERSION < 7
 #include "ext/standard/php_smart_str.h"
@@ -318,7 +320,7 @@ void swoole_set_object(zval *object, void *ptr)
             return ;
         }
 
-        bzero(new_ptr + (old_size * sizeof(void*)), (new_size - old_size) * sizeof(void*));
+        bzero(((char *)new_ptr) + (old_size * sizeof(char *)), (new_size - old_size) * sizeof(char *));
         swoole_objects.array = new_ptr;
         swoole_objects.size = new_size;
     }
@@ -397,7 +399,7 @@ void swoole_set_property(zval *object, int property_id, void *ptr)
         }
         if (old_size > 0)
         {
-            bzero(new_ptr + old_size * sizeof(void*), (new_size - old_size) * sizeof(void*));
+            bzero(((char *)new_ptr) + old_size * sizeof(char*), (new_size - old_size) * sizeof(char*));
         }
         swoole_objects.property_size[property_id] = new_size;
         swoole_objects.property[property_id] = new_ptr;
@@ -427,11 +429,13 @@ PHP_MINIT_FUNCTION(zan)
 
     REGISTER_LONG_CONSTANT("SWOOLE_PACKET", SW_MODE_PACKET, CONST_CS | CONST_PERSISTENT);
 
+#ifndef PHP_WIN32
     /**
      * ipc mode
      */
     REGISTER_LONG_CONSTANT("SWOOLE_IPC_UNSOCK", ZAN_IPC_UNSOCK, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("SWOOLE_IPC_MSGQUEUE", ZAN_IPC_MSGQUEUE, CONST_CS | CONST_PERSISTENT);
+#endif
 
     /**
      * socket type
@@ -492,8 +496,10 @@ PHP_MINIT_FUNCTION(zan)
     REGISTER_LONG_CONSTANT("SWOOLE_DTLSv1_CLIENT_METHOD", SW_DTLSv1_CLIENT_METHOD, CONST_CS | CONST_PERSISTENT);
 #endif
 
+#ifndef PHP_WIN32
     REGISTER_LONG_CONSTANT("SWOOLE_EVENT_READ", SW_EVENT_READ, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("SWOOLE_EVENT_WRITE", SW_EVENT_WRITE, CONST_CS | CONST_PERSISTENT);
+#endif
 
     REGISTER_STRINGL_CONSTANT("SWOOLE_VERSION", PHP_SWOOLE_VERSION, sizeof(PHP_SWOOLE_VERSION) - 1, CONST_CS | CONST_PERSISTENT);
 
@@ -516,7 +522,7 @@ PHP_MINIT_FUNCTION(zan)
     swoole_http_server_init(module_number TSRMLS_CC);
     swoole_websocket_init(module_number TSRMLS_CC);
     swoole_mysql_init(module_number TSRMLS_CC);
-
+#ifndef PHP_WIN32
     if (SWOOLE_G(aio_thread_num) > 0)
     {
         if (SWOOLE_G(aio_thread_num) > SW_AIO_THREAD_NUM_MAX)
@@ -525,7 +531,7 @@ PHP_MINIT_FUNCTION(zan)
         }
         ZanAIO.thread_num = SWOOLE_G(aio_thread_num);
     }
-
+#endif
     if (strcasecmp("cli", sapi_module.name) == 0)
     {
         SWOOLE_G(cli) = 1;
@@ -620,8 +626,9 @@ PHP_RINIT_FUNCTION(zan)
 {
     //running
     //SwooleG.running = 1;
+#ifndef PHP_WIN32
     ServerG.running = 1;
-
+#endif
 #ifdef ZTS
     if (sw_thread_ctx == NULL)
     {
@@ -638,6 +645,7 @@ PHP_RINIT_FUNCTION(zan)
 
 PHP_RSHUTDOWN_FUNCTION(zan)
 {
+#ifndef PHP_WIN32
     //clear pipe buffer
     if (is_worker())
     {
@@ -671,6 +679,7 @@ PHP_RSHUTDOWN_FUNCTION(zan)
     /// clean client information
     swoole_thread_clean();
     //SwooleWG.reactor_wait_onexit = 0;
+#endif
     return SUCCESS;
 }
 
@@ -684,7 +693,9 @@ PHP_FUNCTION(swoole_version)
 PHP_FUNCTION(swoole_cpu_num)
 {
     long cpu_num = 1;
+#ifndef PHP_WIN32
     cpu_num = sysconf(_SC_NPROCESSORS_CONF);
+#endif
     if(cpu_num < 1)
     {
         cpu_num = 1;
@@ -731,9 +742,9 @@ PHP_FUNCTION(swoole_set_process_name)
         php_error_docref(NULL TSRMLS_CC, E_WARNING, "process name max len is 127");
         return;
     }
-
+#ifndef PHP_WIN32
     size = (size > ServerG.pagesize)? ServerG.pagesize:size;
-
+#endif
 #if PHP_MAJOR_VERSION >= 7 || (PHP_MAJOR_VERSION == 5 && PHP_MINOR_VERSION > 4)
     zval *function = NULL;
     SW_MAKE_STD_ZVAL(function);
@@ -762,6 +773,13 @@ PHP_FUNCTION(swoole_set_process_name)
 
 PHP_FUNCTION(swoole_get_local_ip)
 {
+    if (is_master() || is_networker())
+    {
+        zanWarn("swoole_get_local_ip can not be used in master or networker process, type=%d", ServerG.process_type);
+        RETURN_FALSE;
+    }
+
+#ifndef PHP_WIN32
     struct ifaddrs *ipaddrs = NULL;
     if (getifaddrs(&ipaddrs) != 0 || !ipaddrs)
     {
@@ -789,8 +807,7 @@ PHP_FUNCTION(swoole_get_local_ip)
 //                break;
             default:
                 continue;
-        }
-
+		}
         char ip[SW_IP_MAX_LENGTH] = {0};
         if (!inet_ntop(ifa->ifa_addr->sa_family, in_addr, ip, sizeof(ip)))
         {
@@ -801,6 +818,6 @@ PHP_FUNCTION(swoole_get_local_ip)
             sw_add_assoc_string(return_value, ifa->ifa_name, ip, 1);
         }
     }
-
     freeifaddrs(ipaddrs);
+#endif
 }
